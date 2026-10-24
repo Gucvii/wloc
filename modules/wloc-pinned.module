@@ -1,5 +1,5 @@
-#!name=Apple WLOC 定位修改（审计锁定版）
-#!desc=Apple 网络定位修改 | 脚本锁定到已审计的 commit，不使用 main 分支 | 审计记录见仓库 AUDIT.md
+#!name=Apple WLOC 定位修改（锁 SHA 版）
+#!desc=Apple 网络定位修改 | 脚本锁定到已审计 commit，不随 main 变化 | 审计记录见 AUDIT.md
 #!author=Yu9191 / fork audited by Gucvii
 #!homepage=https://github.com/Gucvii/wloc/blob/main/AUDIT.md
 #!category=Tools
