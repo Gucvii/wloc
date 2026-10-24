@@ -47,6 +47,11 @@ input:focus{outline:none;border-color:var(--accent);background:#fff}
 .btn.danger{background:#fdeceb;color:var(--danger)}
 .btn.secondary{background:#ececef;color:var(--fg)}
 .btn.ghost{background:#fff;border:1px solid var(--line);color:var(--fg)}
+.inline{display:flex;gap:6px;align-items:stretch}
+.inline input{flex:1;min-width:0}
+.sign{flex:none;width:46px;border:1px solid var(--line);border-radius:10px;background:#fff;
+  color:var(--fg);font-size:17px;font-weight:600;cursor:pointer;line-height:1}
+.sign:active{background:var(--tap)}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .btns .full{grid-column:1/-1}
 .note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6}
@@ -82,21 +87,31 @@ footer a{color:var(--muted)}
   <div class="row">
     <div class="field">
       <label>纬度 latitude</label>
-      <input id="lat" type="number" step="any" min="-90" max="90" inputmode="decimal">
+      <div class="inline">
+        <input id="lat" type="text" inputmode="decimal" autocomplete="off"
+               autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 39.1157">
+        <button class="sign" data-target="lat" aria-label="切换正负号">±</button>
+      </div>
     </div>
     <div class="field">
       <label>经度 longitude</label>
-      <input id="lon" type="number" step="any" min="-180" max="180" inputmode="decimal">
+      <div class="inline">
+        <input id="lon" type="text" inputmode="decimal" autocomplete="off"
+               autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="如 -77.5636">
+        <button class="sign" data-target="lon" aria-label="切换正负号">±</button>
+      </div>
     </div>
   </div>
   <div class="row">
     <div class="field">
       <label>精度 accuracy（米）</label>
-      <input id="acc" type="number" step="1" min="0" value="50" inputmode="numeric">
+      <input id="acc" type="text" inputmode="numeric" autocomplete="off"
+             autocapitalize="off" autocorrect="off" spellcheck="false" value="50">
     </div>
     <div class="field">
       <label>扰动半径（米）</label>
-      <input id="radius" type="number" step="1" min="0" value="0" inputmode="numeric">
+      <input id="radius" type="text" inputmode="numeric" autocomplete="off"
+             autocapitalize="off" autocorrect="off" spellcheck="false" value="0">
     </div>
   </div>
   <div class="btns">
@@ -206,8 +221,18 @@ function setStatus(text, cls) {
 }
 
 /* ---------- 输入 ---------- */
+function normalize(str) {
+  return String(str == null ? '' : str)
+    .replace(/[\u2212\u2013\u2014\uFF0D]/g, '-')   // − – — －
+    .replace(/[\uFF0E\u3002]/g, '.')                // ． 。
+    .replace(/[\uFF0C]/g, ',')                       // ，
+    .replace(/[^0-9eE+\-.,]/g, '')
+    .trim();
+}
 function num(id) {
-  var v = parseFloat($(id).value);
+  var raw = normalize($(id).value);
+  if (raw === '' || raw === '-' || raw === '+' || raw === '.' || raw === '-.') return null;
+  var v = parseFloat(raw);
   return Number.isFinite(v) ? v : null;
 }
 function readInputs() {
@@ -250,6 +275,36 @@ function coherence() {
 ['lat', 'lon', 'acc', 'radius'].forEach(function (id) {
   $(id).addEventListener('input', coherence);
 });
+
+/* ---------- 正负号与粘贴 ---------- */
+Array.prototype.forEach.call(document.querySelectorAll('.sign'), function (btn) {
+  btn.addEventListener('click', function () {
+    var el = $(btn.dataset.target);
+    var raw = normalize(el.value);
+    if (raw === '') { el.value = '-'; }
+    else if (raw.charAt(0) === '-') { el.value = raw.slice(1); }
+    else { el.value = '-' + raw; }
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+});
+
+['lat', 'lon'].forEach(function (id) {
+  $(id).addEventListener('paste', function (e) {
+    var text = (e.clipboardData || window.clipboardData || {}).getData
+      ? (e.clipboardData || window.clipboardData).getData('text') : '';
+    if (!text) return;
+    var m = normalize(text).match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+    if (!m) return;
+    e.preventDefault();
+    $('lat').value = m[1];
+    $('lon').value = m[2];
+    coherence();
+    syncFromInputs();
+    cacheInputs();
+    toast('已按「纬度, 经度」填入');
+  });
+});
+
 
 /* ---------- 地图 ---------- */
 var map = L.map('map', { zoomControl: true, attributionControl: false }).setView([20, 0], 2);
