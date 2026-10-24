@@ -1,46 +1,46 @@
-# 选点页来源与改动说明
+# WLOC 选点页（自建版）
 
-本目录的 `index.html` 是 WLOC 地图选点页的**静态托管副本**。
+## 来源
 
-## 上游
+本页面为自建实现，协议细节参考：
 
-- 来源仓库：<https://github.com/xepes0/wloc>
-- 源文件：`worker/src/page.js` 导出的 HTML（Worker 动态渲染版）
-- 上游许可证：**AGPL-3.0**（本目录 `LICENSE` 为原样副本）
-- 生成日期：2026-10-24
+- <https://github.com/xepes0/wloc> — `worker/src/wloc-settings.js`（本地写入接口）
+  与 `worker/src/gcj-browser.js`（GCJ-02 换算），**AGPL-3.0**
+- 上游许可证副本见本目录 `LICENSE`
 
-## 本副本的改动
+## 接口（由代理脚本在本地拦截）
 
-只做两处，其余保持原样：
+```
+GET https://gs-loc.apple.com/wloc-settings/save?action=query
+  → {success, longitude, latitude, accuracy, randomRadius, updatedAt}
 
-1. **模块订阅链接**改为指向本仓库（`Gucvii/wloc`），不再指向上游。
-2. **移除 `/api/parse` 链接解析**：该功能依赖 Worker 服务端展开短链并做 GCJ-02→WGS84
-   换算，静态托管无法提供。页面会提示改用地图选点或手填经纬度。
+GET https://gs-loc.apple.com/wloc-settings/save?action=clear
+  → {success}
 
-地图底图、坐标换算、本地存储、`gs-loc.apple.com/wloc-settings/save` 写入逻辑
-均与上游一致。
-
-## 生成方式（可复现）
-
-```bash
-git clone https://github.com/Gucvii/wloc
-cd wloc/worker/src
-
-# project.js 中的 SOURCE_URL 与 MODULE_LINKS 已指向本仓库
-node -e "import('./page.js').then(m=>require('fs').writeFileSync('index.html', m.getPageHtml()))"
+GET https://gs-loc.apple.com/wloc-settings/save?lat=..&lon=..&acc=..&randomRadius=..
+  → {success, longitude, latitude, accuracy, randomRadius}
 ```
 
-随后对产出的 `index.html` 应用上述两处改动。
+参数同时接受 `lat`/`latitude`、`lon`/`longitude`、`acc`/`accuracy`。
+`action` 缺省为 `save`。
 
-## 隐私说明
+## 功能
 
-- 页面本身**无后端**，不收集、不上传任何数据。
-- 坐标通过 `https://gs-loc.apple.com/wloc-settings/save` 写入设备，该请求由手机端
-  代理脚本在本地截住，不离开设备。
-- 页面会向地图瓦片服务商（OpenStreetMap / ArcGIS / 高德 / Carto）请求当前视野的
-  瓦片，**服务商可据此得知你正在查看的区域**。这是地图类页面的固有特性。
-- 地名搜索会把关键词发送至 `nominatim.openstreetmap.org`。
+- 独立的纬度 / 经度 / 精度 / 扰动半径输入框
+- 地图选点：卫星 / 标准 / 高德 / 暗色四种底图
+- 高德底图自动做 GCJ-02 ↔ WGS84 换算
+- 储存到设备 / 查询当前 / 恢复真实定位
+- 读取设备定位并与填写坐标比对距离
+- 扰动半径与精度的一致性提示
+- 上次填写的坐标保存在浏览器 localStorage
+
+## 隐私
+
+- 页面**无后端**，不上传坐标。
+- 写入请求由手机端代理脚本本地拦截，不离开设备。
+- 地图瓦片请求会暴露你正在查看的区域给瓦片服务商
+  （OpenStreetMap / Esri / 高德 / Carto）。这是地图页面的固有特性。
 
 ## 许可证
 
-AGPL-3.0。详见 `LICENSE`。
+AGPL-3.0。
