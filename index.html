@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!--
   WLOC 选点页（自建版）
-  协议来源：xepes0/wloc 的 wloc-settings.js 与 worker/src/page.js（AGPL-3.0）
+  协议来源：xepes0/wloc 的 wloc-settings.js 与 gcj-browser.js（AGPL-3.0）
   本实现：https://github.com/Gucvii/wloc
   说明：页面无后端；坐标写入 https://gs-loc.apple.com/wloc-settings/save，
         该请求由手机端代理脚本在本地截住，不离开设备。
+        页面不含任何预设坐标。
 -->
 <html lang="zh-CN">
 <head>
@@ -45,7 +46,7 @@ input:focus{outline:none;border-color:var(--accent);background:#fff}
 .btn.primary{background:var(--accent);color:#fff}
 .btn.danger{background:#fdeceb;color:var(--danger)}
 .btn.secondary{background:#ececef;color:var(--fg)}
-.btn[disabled]{opacity:.45}
+.btn.ghost{background:#fff;border:1px solid var(--line);color:var(--fg)}
 .btns{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .btns .full{grid-column:1/-1}
 .note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6}
@@ -75,14 +76,17 @@ footer a{color:var(--muted)}
 <h1>WLOC 选点 <span class="pill" id="status">检查中…</span></h1>
 
 <div class="card">
+  <button class="btn ghost" id="ipBtn" style="margin-bottom:10px">根据出口 IP 匹配坐标</button>
+  <div class="note" id="ipInfo" style="margin-top:0;margin-bottom:12px">向 ipwho.is / ipinfo.io 查询当前出口 IP 的归属地。匹配结果只是起点，建议再核对。</div>
+
   <div class="row">
     <div class="field">
       <label>纬度 latitude</label>
-      <input id="lat" type="number" step="any" min="-90" max="90" placeholder="39.1157" inputmode="decimal">
+      <input id="lat" type="number" step="any" min="-90" max="90" inputmode="decimal">
     </div>
     <div class="field">
       <label>经度 longitude</label>
-      <input id="lon" type="number" step="any" min="-180" max="180" placeholder="-77.5636" inputmode="decimal">
+      <input id="lon" type="number" step="any" min="-180" max="180" inputmode="decimal">
     </div>
   </div>
   <div class="row">
@@ -126,7 +130,7 @@ footer a{color:var(--muted)}
 </div>
 
 <footer>
-  无后端 · 坐标不出设备 · 写入由手机端代理脚本本地拦截<br>
+  无后端 · 页面不含预设坐标 · 写入由手机端代理脚本本地拦截<br>
   协议参考 <a href="https://github.com/xepes0/wloc" target="_blank" rel="noopener">xepes0/wloc</a>（AGPL-3.0）·
   本页 <a href="https://github.com/Gucvii/wloc" target="_blank" rel="noopener">Gucvii/wloc</a>
 </footer>
@@ -201,7 +205,7 @@ function setStatus(text, cls) {
   p.className = 'pill' + (cls ? ' ' + cls : '');
 }
 
-/* ---------- 输入与联动 ---------- */
+/* ---------- 输入 ---------- */
 function num(id) {
   var v = parseFloat($(id).value);
   return Number.isFinite(v) ? v : null;
@@ -210,11 +214,12 @@ function readInputs() {
   var lat = num('lat'), lon = num('lon');
   if (lat === null || lon === null) return null;
   if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  var a = num('acc'), r = num('radius');
   return {
     lat: lat,
     lon: lon,
-    acc: Math.max(0, Math.round(num('acc') ?? 50)),
-    radius: Math.max(0, Math.round(num('radius') ?? 0))
+    acc: Math.max(0, Math.round(a === null ? 50 : a)),
+    radius: Math.max(0, Math.round(r === null ? 0 : r))
   };
 }
 function haversine(a, b, c, d) {
@@ -230,13 +235,13 @@ function coherence() {
   var v = readInputs();
   var el = $('coherence');
   if (!v) { el.textContent = ''; el.className = 'note'; return; }
-  if (v.radius > v.acc / 2 && v.radius > 0) {
+  if (v.radius === 0) {
+    el.className = 'note';
+    el.textContent = '扰动半径 0：每次返回同一坐标，与真实网络定位的确定性一致。';
+  } else if (v.radius > v.acc / 2) {
     el.className = 'note warn';
     el.textContent = '扰动半径 ' + v.radius + ' 米大于精度的一半（' + Math.round(v.acc / 2) +
       ' 米）。每次响应会随机偏移，可能与申报精度自相矛盾，建议改为 0。';
-  } else if (v.radius === 0) {
-    el.className = 'note';
-    el.textContent = '扰动半径 0：每次返回同一坐标，与真实网络定位的确定性一致。';
   } else {
     el.className = 'note';
     el.textContent = '扰动半径 ' + v.radius + ' 米，小于精度的一半，可视为正常抖动。';
@@ -247,7 +252,7 @@ function coherence() {
 });
 
 /* ---------- 地图 ---------- */
-var map = L.map('map', { zoomControl: true, attributionControl: false }).setView([39.1157, -77.5636], 12);
+var map = L.map('map', { zoomControl: true, attributionControl: false }).setView([20, 0], 2);
 var layers = {
   standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }),
   satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }),
@@ -257,31 +262,37 @@ var layers = {
 var currentLayer = 'satellite';
 layers.satellite.addTo(map);
 
-var marker = L.marker([39.1157, -77.5636], { draggable: true }).addTo(map);
-
+var marker = null;
 function isGcj() { return currentLayer === 'amap'; }
 function toMap(lat, lon) { return isGcj() ? wgs84ToGcj02(lat, lon) : { lat: lat, lon: lon }; }
 function toWgs(lat, lon) { return isGcj() ? gcj02ToWgs84(lat, lon) : { lat: lat, lon: lon }; }
 
+function placeMarker(lat, lon, zoom) {
+  if (!marker) {
+    marker = L.marker([lat, lon], { draggable: true }).addTo(map);
+    marker.on('dragend', function () { setFromMap(marker.getLatLng()); });
+  } else {
+    marker.setLatLng([lat, lon]);
+  }
+  if (zoom) map.setView([lat, lon], zoom);
+}
 function syncFromInputs() {
   var v = readInputs();
   if (!v) return;
   var m = toMap(v.lat, v.lon);
-  marker.setLatLng([m.lat, m.lon]);
+  placeMarker(m.lat, m.lon);
 }
 function setFromMap(latlng) {
   var w = toWgs(latlng.lat, latlng.lng);
   $('lat').value = w.lat.toFixed(6);
   $('lon').value = w.lon.toFixed(6);
   coherence();
+  cacheInputs();
 }
 
 map.on('click', function (e) {
-  marker.setLatLng(e.latlng);
+  placeMarker(e.latlng.lat, e.latlng.lng);
   setFromMap(e.latlng);
-});
-marker.on('dragend', function () {
-  setFromMap(marker.getLatLng());
 });
 ['lat', 'lon'].forEach(function (id) {
   $(id).addEventListener('change', syncFromInputs);
@@ -292,7 +303,6 @@ $('layers').addEventListener('click', function (e) {
   if (!btn) return;
   var name = btn.dataset.layer;
   if (!layers[name]) return;
-  // 切换瓦片前先记录当前 WGS84 位置，切换后按新图源重新放置标记
   var v = readInputs();
   map.removeLayer(layers[currentLayer]);
   currentLayer = name;
@@ -305,17 +315,85 @@ $('layers').addEventListener('click', function (e) {
     : '点地图或拖图钉选点，坐标会自动填入上面的输入框。';
   if (v) {
     var m = toMap(v.lat, v.lon);
-    marker.setLatLng([m.lat, m.lon]);
+    placeMarker(m.lat, m.lon);
     map.setView([m.lat, m.lon], map.getZoom());
   }
 });
 
-/* ---------- 操作 ---------- */
+/* ---------- IP 匹配 ---------- */
+function validCoord(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon) &&
+    Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && !(lat === 0 && lon === 0);
+}
+
+function ipMatch() {
+  $('ipInfo').textContent = '查询中…';
+  var done = false;
+
+  function ok(info) {
+    if (done) return;
+    done = true;
+    $('lat').value = info.lat.toFixed(6);
+    $('lon').value = info.lon.toFixed(6);
+    coherence();
+    var m = toMap(info.lat, info.lon);
+    placeMarker(m.lat, m.lon, 12);
+    var parts = [info.city, info.region, info.country, info.tz].filter(Boolean);
+    $('ipInfo').textContent = parts.join(' · ') + '　via ' + info.src +
+      '（' + info.lat.toFixed(4) + ', ' + info.lon.toFixed(4) + '）';
+    toast('已按出口 IP 填充：' + (info.city || info.country || '未知'), 2600);
+    cacheInputs();
+  }
+
+  function fail() {
+    if (done) return;
+    done = true;
+    $('ipInfo').textContent = 'IP 归属地服务不可用（可能被代理拦截或限流），请手动填写。';
+    toast('IP 匹配失败，请手动填写坐标', 3000);
+  }
+
+  var timer = setTimeout(fail, 9000);
+
+  fetch('https://ipwho.is/', { cache: 'no-store' }).then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.success && validCoord(j.latitude, j.longitude)) {
+        clearTimeout(timer);
+        ok({
+          lat: j.latitude, lon: j.longitude,
+          city: j.city, region: j.region, country: j.country,
+          tz: (j.timezone || {}).id, src: 'ipwho.is'
+        });
+        return;
+      }
+      throw new Error('ipwho');
+    })
+    .catch(function () {
+      return fetch('https://ipinfo.io/json', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j && typeof j.loc === 'string') {
+            var p = j.loc.split(',');
+            var la = parseFloat(p[0]), lo = parseFloat(p[1]);
+            if (validCoord(la, lo)) {
+              clearTimeout(timer);
+              ok({ lat: la, lon: lo, city: j.city, region: j.region, country: j.country, tz: j.timezone, src: 'ipinfo.io' });
+              return;
+            }
+          }
+          throw new Error('ipinfo');
+        });
+    })
+    .catch(function () { clearTimeout(timer); fail(); });
+}
+
+$('ipBtn').addEventListener('click', ipMatch);
+
+/* ---------- 设备操作 ---------- */
 function renderSaved(j) {
   if (j && j.success) {
     $('savedCoord').textContent = fmt(j.latitude) + ', ' + fmt(j.longitude);
-    $('savedAcc').textContent = (j.accuracy ?? 25) + ' 米';
-    $('savedRadius').textContent = (j.randomRadius ?? 0) + ' 米';
+    $('savedAcc').textContent = (j.accuracy == null ? 25 : j.accuracy) + ' 米';
+    $('savedRadius').textContent = (j.randomRadius == null ? 0 : j.randomRadius) + ' 米';
     $('savedAt').textContent = j.updatedAt ? String(j.updatedAt).replace('T', ' ').slice(0, 19) : '—';
   } else if (j) {
     $('savedCoord').textContent = '未设置（透传真实定位）';
@@ -338,8 +416,8 @@ function query(silent) {
       if (!silent && j.success) {
         $('lat').value = j.latitude;
         $('lon').value = j.longitude;
-        $('acc').value = j.accuracy ?? 25;
-        $('radius').value = j.randomRadius ?? 0;
+        $('acc').value = j.accuracy == null ? 25 : j.accuracy;
+        $('radius').value = j.randomRadius == null ? 0 : j.randomRadius;
         syncFromInputs();
         coherence();
       }
@@ -349,9 +427,7 @@ function query(silent) {
   }).catch(function () {
     setStatus('模块未生效', 'bad');
     renderSaved(undefined);
-    if (!silent) {
-      toast('未连上模块：请确认代理已开启、HTTPS 解密已开、证书已信任', 3600);
-    }
+    if (!silent) toast('未连上模块：检查代理开关、HTTPS 解密、证书信任', 3600);
   });
 }
 
@@ -364,6 +440,7 @@ $('saveBtn').addEventListener('click', function () {
         toast('已写入设备，请关/开定位服务或重启手机刷新缓存', 3200);
         renderSaved(j);
         setStatus('模块已生效', 'ok');
+        cacheInputs();
       } else {
         toast('写入失败：' + ((j && j.error) || '未知原因'), 3200);
       }
@@ -380,8 +457,7 @@ $('dragBtn').addEventListener('click', function () {
   var v = readInputs();
   if (!v) { toast('请先填写有效的经纬度'); return; }
   var m = toMap(v.lat, v.lon);
-  marker.setLatLng([m.lat, m.lon]);
-  map.setView([m.lat, m.lon], Math.max(map.getZoom(), 14));
+  placeMarker(m.lat, m.lon, Math.max(map.getZoom(), 14));
   toast('已定位到 ' + fmt(v.lat, 4) + ', ' + fmt(v.lon, 4));
 });
 
@@ -422,28 +498,31 @@ $('deviceBtn').addEventListener('click', function () {
   }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 });
 
+/* ---------- 本地缓存 ---------- */
+function cacheInputs() {
+  var v = readInputs();
+  if (!v) return;
+  try { localStorage.setItem('wloc.last', JSON.stringify(v)); } catch (e) {}
+}
+
 /* ---------- 启动 ---------- */
 (function init() {
-  coherence();
   var saved = null;
   try { saved = JSON.parse(localStorage.getItem('wloc.last') || 'null'); } catch (e) {}
-  if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon)) {
+  if (saved && validCoord(saved.lat, saved.lon)) {
     $('lat').value = saved.lat;
     $('lon').value = saved.lon;
     if (saved.acc != null) $('acc').value = saved.acc;
     if (saved.radius != null) $('radius').value = saved.radius;
+    var m = toMap(saved.lat, saved.lon);
+    placeMarker(m.lat, m.lon, 11);
   }
-  syncFromInputs();
+  coherence();
   query(true);
 })();
 
 ['lat', 'lon', 'acc', 'radius'].forEach(function (id) {
-  $(id).addEventListener('change', function () {
-    var v = readInputs();
-    if (v) {
-      try { localStorage.setItem('wloc.last', JSON.stringify(v)); } catch (e) {}
-    }
-  });
+  $(id).addEventListener('change', cacheInputs);
 });
 </script>
 </body>
